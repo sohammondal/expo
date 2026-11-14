@@ -170,7 +170,42 @@ export default function Page() {
 
 ## Query parameters
 
-Most query parameters will not be represented in the file system and therefore cannot be typed automatically. You can type query parameters manually by passing a generic to the `useLocalSearchParams` and `useGlobalSearchParams` hooks. For example:
+Query parameters are not part of the file name, so a route declares them. Export a `SearchParams` type from the route file:
+
+```tsx src/app/search.tsx
+import { Text } from 'react-native';
+import { useLocalSearchParams } from 'expo-router';
+
+/* @info Query parameters this route reads */
+export type SearchParams = {
+  query?: string;
+  sort?: 'newest' | 'price';
+};
+/* @end */
+
+export default function Page() {
+  const { query, sort } = useLocalSearchParams<'/search'>();
+
+  return <Text>Search: {query ?? 'unset'}</Text>;
+}
+```
+
+Expo CLI uses the export when it generates types. `router.push`, `<Link>`, and `router.setParams` reject keys and values that `SearchParams` does not declare. `useLocalSearchParams<'/search'>()` and `useGlobalSearchParams<'/search'>()` return the declared keys:
+
+```tsx
+router.push({ pathname: '/search', params: { query: 'shoes', sort: 'price' } });
+
+// @ts-expect-error 'qury' is not declared in SearchParams
+router.push({ pathname: '/search', params: { qury: 'shoes' } });
+```
+
+If a key is required, `params` is required. On input, a `string` value also accepts a `number`, the same as a dynamic route parameter. Values in a string href, such as `/search?qury=shoes`, are not checked.
+
+> **info** The types describe the URL that your app creates. A deep link can contain any query parameters, so validate values at runtime when the input is not trusted.
+
+### Type query parameters in the hook
+
+A route without a `SearchParams` export accepts any query parameter. You can type query parameters manually by passing a generic to the `useLocalSearchParams` and `useGlobalSearchParams` hooks. For example:
 
 ```tsx src/app/search.tsx
 import { Text } from 'react-native';
