@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { getTypedRoutesDeclarationFile } from './generate';
+import { createSearchParamsImportPathResolver } from './searchParams';
 
 const defaultCtx = requireContext(process.env.EXPO_ROUTER_APP_ROOT, true, EXPO_ROUTER_CTX_IGNORE);
 
@@ -87,7 +88,13 @@ export const regenerateDeclarations = debounce(
   ) => {
     // Don't crash the process, just log the error. The user will most likely fix it and continue
     try {
-      const file = getTypedRoutesDeclarationFile(ctx, options);
+      const appRoot = process.env.EXPO_ROUTER_APP_ROOT;
+      const file = getTypedRoutesDeclarationFile(ctx, {
+        ...options,
+        getSearchParamsImportPath: appRoot
+          ? createSearchParamsImportPathResolver(appRoot, path.resolve(outputDir))
+          : undefined,
+      });
       if (!file) return;
       fs.writeFileSync(path.resolve(outputDir, './router.d.ts'), file);
     } catch (error) {

@@ -141,6 +141,36 @@ it('expands groups', () => {
   });
 });
 
+it('uses the SearchParams type of routes that export it', () => {
+  const output = getTypedRoutesDeclarationFile(
+    inMemoryContext({
+      search: () => null,
+      settings: () => null,
+      'product/[id]': () => null,
+    }),
+    {
+      getSearchParamsImportPath: (contextKey) =>
+        ({ './search.js': './app/search', './product/[id].js': './app/product/[id]' })[contextKey],
+    }
+  );
+
+  expect(getGeneratedRoutesFromOutput(output)).toEqual({
+    href: 'Router.RelativePathString | Router.ExternalPathString | `/search` | `/settings` | `/_sitemap` | { pathname: Router.RelativePathString | Router.ExternalPathString | `/settings` | `/_sitemap`; params?: Router.UnknownInputParams; } | SearchParamsInputObject<`/search`, import("./app/search").SearchParams, {}> | `/product/${Router.SingleRoutePart<T>}` | SearchParamsInputObject<`/product/[id]`, import("./app/product/[id]").SearchParams, { id: string | number; }>',
+    hrefInputParams:
+      '{ pathname: Router.RelativePathString, params?: Router.UnknownInputParams } | { pathname: Router.ExternalPathString, params?: Router.UnknownInputParams } | SearchParamsInputObject<`/search`, import("./app/search").SearchParams, {}> | { pathname: `/settings`; params?: Router.UnknownInputParams; } | { pathname: `/_sitemap`; params?: Router.UnknownInputParams; } | SearchParamsInputObject<`/product/[id]`, import("./app/product/[id]").SearchParams, { id: string | number; }>',
+    hrefOutputParams:
+      '{ pathname: Router.RelativePathString, params?: Router.UnknownOutputParams } | { pathname: Router.ExternalPathString, params?: Router.UnknownOutputParams } | { pathname: `/search`; params: import("./app/search").SearchParams; } | { pathname: `/settings`; params?: Router.UnknownOutputParams; } | { pathname: `/_sitemap`; params?: Router.UnknownOutputParams; } | { pathname: `/product/[id]`, params: import("./app/product/[id]").SearchParams & { id: string; } }',
+  });
+});
+
+it('adds the SearchParams helper types when a route exports SearchParams', () => {
+  const output = getTypedRoutesDeclarationFile(inMemoryContext({ search: () => null }), {
+    getSearchParamsImportPath: () => './app/search',
+  });
+
+  expect(output).toContain('type SearchParamsInputObject<P, S, D> =');
+});
+
 describe(getWatchHandler, () => {
   const originalAppRoot = process.env.EXPO_ROUTER_APP_ROOT;
   let handler: ReturnType<typeof getWatchHandler>;

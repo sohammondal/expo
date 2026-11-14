@@ -10,9 +10,23 @@ const GROUP = /(?:^|\/)\(.*?\)/g;
 
 const urlParams = "${`?${string}` | `#${string}` | ''}";
 
+const searchParamsHelpers = `
+type SearchParamsInputValue<V> = V extends readonly (infer U)[]
+  ? SearchParamsInputValue<U>[]
+  : string extends V
+    ? string | number
+    : V;
+type SearchParamsInput<S> = { [K in keyof S]: SearchParamsInputValue<S[K]> };
+type SearchParamsInputObject<P, S, D> = {} extends SearchParamsInput<S> & D
+  ? { pathname: P; params?: SearchParamsInput<S> & D }
+  : { pathname: P; params: SearchParamsInput<S> & D };
+`;
+
 export type GetTypedRoutesDeclarationFileOptions = {
   partialTypedGroups?: boolean;
   testIgnoreComments?: boolean;
+  /** Returns the import path of a route module that exports `SearchParams`, relative to the output file. */
+  getSearchParamsImportPath?: (contextKey: string) => string | undefined;
 };
 
 export function getTypedRoutesDeclarationFile(
@@ -20,6 +34,7 @@ export function getTypedRoutesDeclarationFile(
   {
     partialTypedGroups = false,
     testIgnoreComments = false,
+    getSearchParamsImportPath,
   }: GetTypedRoutesDeclarationFileOptions = {}
 ) {
   let routeNode: RouteNode | null = null;
@@ -39,6 +54,11 @@ export function getTypedRoutesDeclarationFile(
   }
 
   const groupedNodes = groupRouteNodes(routeNode);
+  const searchParamsTypes = getSearchParamsTypes(
+    groupedNodes.contextKeys,
+    getSearchParamsImportPath
+  );
+  const staticSearchParamsObjects: string[] = [];
   const staticRoutesStrings: string[] = ['Router.RelativePathString', 'Router.ExternalPathString'];
   const staticPathnames: string[] = ['Router.RelativePathString', 'Router.ExternalPathString'];
   const staticRouteInputObjects: string[] = [
@@ -52,6 +72,17 @@ export function getTypedRoutesDeclarationFile(
 
   for (const type of groupedNodes.static) {
     staticRoutesStrings.push(contextKeyToType(type + urlParams, partialTypedGroups));
+
+    const searchParams = searchParamsTypes.get(type);
+    if (searchParams) {
+      const pathname = contextKeyToType(type, partialTypedGroups);
+      const inputObject = `SearchParamsInputObject<${pathname}, ${searchParams}, {}>`;
+      staticRouteInputObjects.push(inputObject);
+      staticSearchParamsObjects.push(inputObject);
+      staticRouteOutputObjects.push(`{ pathname: ${pathname}; params: ${searchParams}; }`);
+      continue;
+    }
+
     staticPathnames.push(contextKeyToType(type, partialTypedGroups));
     staticRouteInputObjects.push(
       `{ pathname: ${contextKeyToType(type, partialTypedGroups)}; params?: Router.UnknownInputParams; }`
@@ -93,6 +124,18 @@ export function getTypedRoutesDeclarationFile(
       )
     );
 
+    const searchParams = searchParamsTypes.get(dynamicRouteTemplate);
+    if (searchParams) {
+      const pathname = contextKeyToType(dynamicRouteTemplate, partialTypedGroups);
+      dynamicRouteInputObjects.push(
+        `SearchParamsInputObject<${pathname}, ${searchParams}, { ${inputParams} }>`
+      );
+      dynamicRouteOutputObjects.push(
+        `{ pathname: ${pathname}, params: ${searchParams} & { ${outputParams} } }`
+      );
+      continue;
+    }
+
     dynamicRouteInputObjects.push(
       `{ pathname: ${contextKeyToType(dynamicRouteTemplate, partialTypedGroups)}, params: Router.UnknownInputParams & { ${inputParams} } }`
     );
@@ -106,6 +149,8 @@ export function getTypedRoutesDeclarationFile(
   const href = [
     ...staticRoutesStrings,
     `{ pathname: ${staticPathnames.join(' | ')}; params?: Router.UnknownInputParams; }`,
+    // A route with SearchParams needs its own object, so each one adds a member to the union.
+    ...staticSearchParamsObjects,
     ...dynamicRouteStrings,
     ...dynamicRouteInputObjects,
   ].join(' | ');
@@ -117,11 +162,13 @@ export function getTypedRoutesDeclarationFile(
     ? '// @ts-ignore-error -- During tests we need to ignore the "duplicate" declaration error, as multiple fixture declare types \n      '
     : '';
 
+  const helpers = searchParamsTypes.size > 0 ? searchParamsHelpers : '';
+
   return `/* eslint-disable */
 import * as Router from 'expo-router';
 
 export * from 'expo-router';
-
+${helpers}
 declare module 'expo-router' {
   export namespace ExpoRouter {
     export interface __routes<T extends string | object = string> {
@@ -134,11 +181,29 @@ declare module 'expo-router' {
 `;
 }
 
+function getSearchParamsTypes(
+  contextKeys: Map<string, string>,
+  getSearchParamsImportPath: GetTypedRoutesDeclarationFileOptions['getSearchParamsImportPath']
+) {
+  const types = new Map<string, string>();
+  if (!getSearchParamsImportPath) {
+    return types;
+  }
+  for (const [routeKey, contextKey] of contextKeys) {
+    const importPath = getSearchParamsImportPath(contextKey);
+    if (importPath) {
+      types.set(routeKey, `import(${JSON.stringify(importPath)}).SearchParams`);
+    }
+  }
+  return types;
+}
+
 function groupRouteNodes(
   routeNode: RouteNode | null,
   groupedContextKeys = {
     static: new Set<string>(),
     dynamic: new Map<string, string[]>(),
+    contextKeys: new Map<string, string>(),
   }
 ) {
   if (!routeNode) {
@@ -178,6 +243,10 @@ function groupRouteNodes(
   }
 
   routeKey = routeKey.replace(/\\/g, '/');
+
+  if (!routeNode.generated) {
+    groupedContextKeys.contextKeys.set(routeKey, routeNode.contextKey);
+  }
 
   if (routeNode.dynamic) {
     groupedContextKeys.dynamic.set(
